@@ -18,6 +18,8 @@ def FinMap.ext (f : FinMap n n') : FinMap n.succ n'.succ := by
   case zero => exact 0
   case succ x0 => exact (f x0).succ
 
+def FinMap.weaken {n : Nat} : FinMap n n.succ := Fin.succ
+
 /-!
 ## Capture sets
 
@@ -35,8 +37,8 @@ instance : EmptyCollection (CaptureSet n k) where
 instance : Union (CaptureSet n k) where
   union := CaptureSet.union
 
-notation:20 "{x=" x "}" => CaptureSet.singleton x
-notation:20 "{c=" c "}" => CaptureSet.csingleton c
+notation:max "{x=" x "}" => CaptureSet.singleton x
+notation:max "{c=" c "}" => CaptureSet.csingleton c
 
 /-!
 ### Renaming
@@ -54,6 +56,12 @@ def RenameMap.text (ρ : RenameMap n m k n' m' k') : RenameMap n m.succ k n' m'.
 
 def RenameMap.cext (ρ : RenameMap n m k n' m' k') : RenameMap n m k.succ n' m' k'.succ :=
   ⟨ρ.map, ρ.tmap, ρ.cmap.ext⟩
+
+def RenameMap.weaken : RenameMap n m k n.succ m k := ⟨FinMap.weaken, id, id⟩
+
+def RenameMap.tweaken : RenameMap n m k n m.succ k := ⟨id, FinMap.weaken, id⟩
+
+def RenameMap.cweaken : RenameMap n m k n m k.succ := ⟨id, id, FinMap.weaken⟩
 
 def CaptureSet.rename (C : CaptureSet n k) (ρ : RenameMap n m k n' m' k') : CaptureSet n' k' :=
   match C with
@@ -108,6 +116,18 @@ def SType.rename (S : SType n m k) (ρ : RenameMap n m k n' m' k') : SType n' m'
 
 end
 
+def CType.weaken (T : CType n m k) : CType n.succ m k := T.rename RenameMap.weaken
+
+def SType.weaken (S : SType n m k) : SType n.succ m k := S.rename RenameMap.weaken
+
+def CType.tweaken (T : CType n m k) : CType n m.succ k := T.rename RenameMap.tweaken
+
+def SType.tweaken (S : SType n m k) : SType n m.succ k := S.rename RenameMap.tweaken
+
+def CType.cweaken (T : CType n m k) : CType n m k.succ := T.rename RenameMap.cweaken
+
+def SType.cweaken (S : SType n m k) : SType n m k.succ := S.rename RenameMap.cweaken
+
 /-!
 ## Terms
 !-/
@@ -125,8 +145,57 @@ inductive Term : Nat -> Nat -> Nat -> Type where
 | letin : Term n m k -> Term n.succ m k -> Term n m k
 
 /-!
+### Renaming
+!-/
+
+def Term.rename (t : Term n m k) (ρ : RenameMap n m k n' m' k') : Term n' m' k' :=
+  match t with
+  | Term.var x => Term.var (ρ.map x)
+  | Term.abs T t => Term.abs (CType.rename T ρ) (t.rename ρ.ext)
+  | Term.tabs S t => Term.tabs (SType.rename S ρ) (t.rename ρ.text)
+  | Term.cabs t => Term.cabs (t.rename ρ.cext)
+  | Term.app t x => Term.app (t.rename ρ) (ρ.map x)
+  | Term.tapp t S => Term.tapp (t.rename ρ) (SType.rename S ρ)
+  | Term.capp t C => Term.capp (t.rename ρ) (CaptureSet.rename C ρ)
+  | Term.box t => Term.box (t.rename ρ)
+  | Term.unbox C t => Term.unbox (CaptureSet.rename C ρ) (t.rename ρ)
+  | Term.letin t1 t2 => Term.letin (t1.rename ρ) (t2.rename ρ.ext)
+
+/-!
 ## Context
 !-/
+
+inductive Context : Nat -> Nat -> Nat -> Type where
+| empty : Context 0 0 0
+| var : Context n m k -> CType n m k -> Context n.succ m k
+| tvar : Context n m k -> SType n m k -> Context n m.succ k
+| cvar : Context n m k -> Context n m k.succ
+
+inductive Context.Bound : Context n m k -> Fin n -> CType n m k -> Prop where
+| here :
+  Context.Bound (Context.var Γ T) 0 T.weaken
+| there_var :
+  Context.Bound Γ x T ->
+  Context.Bound (Context.var Γ T') x.succ T.weaken
+| there_tvar :
+  Context.Bound Γ x T ->
+  Context.Bound (Context.tvar Γ S) x T.tweaken
+| there_cvar :
+  Context.Bound Γ x T ->
+  Context.Bound (Context.cvar Γ) x T.cweaken
+
+inductive Context.TBound : Context n m k -> Fin m -> SType n m k -> Prop where
+| here :
+  Context.TBound (Context.tvar Γ S) 0 S.tweaken
+| there_var :
+  Context.TBound Γ x S ->
+  Context.TBound (Context.var Γ T) x S.weaken
+| there_tvar :
+  Context.TBound Γ x S ->
+  Context.TBound (Context.tvar Γ S') x.succ S.tweaken
+| there_cvar :
+  Context.TBound Γ x S ->
+  Context.TBound (Context.cvar Γ) x S.cweaken
 
 /-!
 ## Subcapturing
@@ -150,5 +219,46 @@ inductive CaptureSet.Subset : CaptureSet n k -> CaptureSet n k -> Prop where
 
 instance : HasSubset (CaptureSet n k) where
   Subset := CaptureSet.Subset
+
+inductive Subcapture : Context n m k -> CaptureSet n k -> CaptureSet n k -> Prop where
+| sc_var :
+  Context.Bound Γ x (S^C) ->
+  Subcapture Γ {x= x} C
+| sc_elem :
+  C1 ⊆ C2 ->
+  Subcapture Γ C1 C2
+| sc_set :
+  Subcapture Γ C1 C ->
+  Subcapture Γ C2 C ->
+  Subcapture Γ (C1 ∪ C2) C
+| sc_trans :
+  Subcapture Γ C1 C2 ->
+  Subcapture Γ C2 C3 ->
+  Subcapture Γ C1 C3
+
+notation:50 Γ "⊢" C1 "<:c" C2 => Subcapture Γ C1 C2
+
+mutual
+
+inductive CSubtyp : Context n m k -> CType n m k -> CType n m k -> Prop where
+| capt :
+  (Γ ⊢ C1 <:c C2) ->
+  SSubtyp Γ S1 S2 ->
+  CSubtyp Γ (S1^C1) (S2^C2)
+
+inductive SSubtyp : Context n m k -> SType n m k -> SType n m k -> Prop where
+| refl :
+  SSubtyp Γ S S
+| top :
+  SSubtyp Γ S ⊤
+| trans :
+  SSubtyp Γ S1 S2 ->
+  SSubtyp Γ S2 S3 ->
+  SSubtyp Γ S1 S3
+| tvar :
+  Context.TBound Γ x S ->
+  SSubtyp Γ (SType.tvar x) S
+
+end
 
 end CMCC
