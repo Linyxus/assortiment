@@ -1,9 +1,7 @@
 import Mathlib.Data.Fin.Basic
 
 /-!
-
 # Contextual Modal Capture Calculus
-
 !-/
 namespace CMCC
 
