@@ -254,8 +254,8 @@ inductive SSubtyp : Context n m k -> SType n m k -> SType n m k -> Prop where
   SSubtyp Γ S2 S3 ->
   SSubtyp Γ S1 S3
 | tvar :
-  Context.TBound Γ x S ->
-  SSubtyp Γ (SType.tvar x) S
+  Context.TBound Γ X S ->
+  SSubtyp Γ (SType.tvar X) S
 
 end
 
