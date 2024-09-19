@@ -124,4 +124,31 @@ inductive Term : Nat -> Nat -> Nat -> Type where
 | unbox : CaptureSet n k -> Term n m k -> Term n m k
 | letin : Term n m k -> Term n.succ m k -> Term n m k
 
+/-!
+## Context
+!-/
+
+/-!
+## Subcapturing
+!-/
+
+inductive CaptureSet.Subset : CaptureSet n k -> CaptureSet n k -> Prop where
+| refl :
+  CaptureSet.Subset C C
+| empty :
+  CaptureSet.Subset CaptureSet.empty C
+| unionl :
+  C1.Subset C ->
+  C2.Subset C ->
+  CaptureSet.Subset (C1 ∪ C2) C
+| unionrr :
+  C.Subset C1 ->
+  CaptureSet.Subset C (C1 ∪ C2)
+| unionrl :
+  C.Subset C2 ->
+  CaptureSet.Subset C (C1 ∪ C2)
+
+instance : HasSubset (CaptureSet n k) where
+  Subset := CaptureSet.Subset
+
 end CMCC
