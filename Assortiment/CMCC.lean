@@ -434,7 +434,7 @@ notation:50 Γ "⊢" S1 "<:s" S2 => SSubtyp Γ S1 S2
 inductive Typed : Context n m k -> Term n m k -> CType n m k -> CaptureSet n k -> Prop where
 | var :
   Context.Bound Γ x (S^C) ->
-  Typed Γ (Term.var x) (S^{x= x}) {x= x}
+  Typed Γ (Term.var x) (S^{x=x}) {x=x}
 | sub :
   Typed Γ t T C ->
   (Γ ⊢ T <: T') ->
@@ -575,7 +575,7 @@ def Rename.ext {Γ : Context n m k} (ρ : Rename Γ f Δ) (T : CType n m k) :
   Rename (Γ.var T) (f.ext) (Δ.var (T.rename f)) := by
   constructor
   case map =>
-    intro x T hb
+    intro x U hb
     sorry
   case tmap =>
     intro X S hb
