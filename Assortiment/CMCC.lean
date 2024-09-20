@@ -188,6 +188,12 @@ def Term.rename (t : Term n m k) (ρ : RenameMap n m k n' m' k') : Term n' m' k'
 def Term.open {n : Nat} (t : Term n.succ m k) (x : Fin n) : Term n m k :=
   t.rename (RenameMap.open x)
 
+def Term.weaken (t : Term n m k) : Term (n+1) m k := t.rename RenameMap.weaken
+
+def Term.tweaken (t : Term n m k) : Term n m.succ k := t.rename RenameMap.tweaken
+
+def Term.cweaken (t : Term n m k) : Term n m k.succ := t.rename RenameMap.cweaken
+
 /-!
 ## Substitution
 !-/
@@ -463,5 +469,114 @@ inductive Typed : Context n m k -> Term n m k -> CType n m k -> CaptureSet n k -
   Typed Γ t1 T1 C1 ->
   Typed (Context.var Γ T1) t2 (T2.weaken) (C2.weaken) ->
   Typed Γ (Term.letin t1 t2) T2 (C1 ∪ C2)
+
+notation:30 Γ "⊢" t ":" T "@" C => Typed Γ t T C
+
+/-!
+### Value
+!-/
+
+inductive Term.IsVal : Term n m k -> Prop where
+| abs : Term.IsVal (λ(x:T)t)
+| tabs : Term.IsVal (λ[X<:S]t)
+| cabs : Term.IsVal (λ[c]t)
+| box : Term.IsVal (Term.box t)
+
+lemma Term.rename_isval {t : Term n m k}
+  (hv : t.IsVal) :
+  (t.rename ρ).IsVal := by
+  cases hv <;> simp [Term.rename] <;> constructor
+
+def Term.weaken_ext {n : Nat} (t : Term (n+1) m k) : Term (n+2) m k :=
+  t.rename RenameMap.weaken.ext
+
+/-!
+## Reduction
+### Store
+!-/
+inductive Store : Nat -> Type where
+| empty : Store 0
+| cons :
+  (γ : Store n) ->
+  (t : Term n 0 0) ->
+  (hv : t.IsVal) ->
+  Store (n+1)
+
+inductive Store.Lookup : Store n -> Fin n -> Term n m k -> Prop where
+| here :
+  Store.Lookup (Store.cons γ t hv) 0 t.weaken
+| there :
+  Store.Lookup γ x t ->
+  Store.Lookup (Store.cons γ t hv) x.succ t.weaken
+
+/-!
+### Continuation
+!-/
+inductive Cont : Nat -> Type where
+| empty : Cont n
+| cons : Term (n+1) 0 0 -> Cont n -> Cont n
+
+def Cont.weaken (cont : Cont n) : Cont (n+1) :=
+  match cont with
+  | Cont.empty => Cont.empty
+  | Cont.cons t cont => Cont.cons t.weaken_ext cont.weaken
+
+/-!
+### State
+!-/
+structure State (n : Nat) : Type where
+  store : Store n
+  cont : Cont n
+  redex : Term n 0 0
+
+inductive Reduce : State n -> State n' -> Prop where
+| apply :
+  Store.Lookup γ x (λ(x:T)t) ->
+  Reduce
+    ⟨γ, cont, Term.app x y⟩
+    ⟨γ, cont, t.open y⟩
+| tapply :
+  Store.Lookup γ x (λ[X<:S]t) ->
+  Reduce
+    ⟨γ, cont, Term.tapp x S⟩
+    ⟨γ, cont, t.topen S⟩
+| capply :
+  Store.Lookup γ x (λ[c]t) ->
+  Reduce
+    ⟨γ, cont, Term.capp x C⟩
+    ⟨γ, cont, t.copen C⟩
+| openbox :
+  Store.Lookup γ x (Term.box t) ->
+  Reduce
+    ⟨γ, cont, Term.unbox C x⟩
+    ⟨γ, cont, t⟩
+| push :
+  Reduce
+    ⟨γ, cont, Term.letin t u⟩
+    ⟨γ, cont.cons u, t⟩
+| lift :
+  (hv : Term.IsVal v) ->
+  Reduce
+    ⟨γ, Cont.cons t cont, v⟩
+    ⟨γ.cons v hv, cont.weaken, t⟩
+| rename :
+  Reduce
+    ⟨γ, Cont.cons t cont, Term.var x⟩
+    ⟨γ, cont, t.open x⟩
+
+/-!
+## Renaming
+!-/
+structure Rename (Γ : Context n m k) (f : RenameMap n m k n' m' k') (Δ : Context n' m' k') where
+  map : ∀ x T, Γ.Bound x T -> Δ.Bound (f.map x) (T.rename f)
+  tmap : ∀ X S, Γ.TBound X S -> Δ.TBound (f.tmap X) (S.rename f)
+
+def Rename.ext {Γ : Context n m k} (ρ : Rename Γ f Δ) (T : CType n m k) :
+  Rename (Γ.var T) (f.ext) (Δ.var (T.rename f)) := by
+  constructor
+  case map =>
+    intro x T hb
+    sorry
+  case tmap => sorry
 
 end CMCC
