@@ -18,6 +18,12 @@ def FinMap.ext (f : FinMap n n') : FinMap n.succ n'.succ := by
 
 def FinMap.weaken {n : Nat} : FinMap n n.succ := Fin.succ
 
+def FinMap.open (x : Fin n) : FinMap n.succ n := by
+  intro i
+  cases i using Fin.cases
+  case zero => exact x
+  case succ i0 => exact i0
+
 /-!
 ## Capture sets
 
@@ -61,12 +67,24 @@ def RenameMap.tweaken : RenameMap n m k n m.succ k := ⟨id, FinMap.weaken, id�
 
 def RenameMap.cweaken : RenameMap n m k n m k.succ := ⟨id, id, FinMap.weaken⟩
 
+def RenameMap.open (x : Fin n) : RenameMap n.succ m k n m k := ⟨FinMap.open x, id, id⟩
+
+def RenameMap.topen (x : Fin m) : RenameMap n m.succ k n m k := ⟨id, FinMap.open x, id⟩
+
+def RenameMap.copen (x : Fin k) : RenameMap n m k.succ n m k := ⟨id, id, FinMap.open x⟩
+
 def CaptureSet.rename (C : CaptureSet n k) (ρ : RenameMap n m k n' m' k') : CaptureSet n' k' :=
   match C with
   | CaptureSet.singleton x => CaptureSet.singleton (ρ.map x)
   | CaptureSet.csingleton c => CaptureSet.csingleton (ρ.cmap c)
   | CaptureSet.empty => CaptureSet.empty
   | CaptureSet.union C1 C2 => CaptureSet.union (CaptureSet.rename C1 ρ) (CaptureSet.rename C2 ρ)
+
+def CaptureSet.weaken (C : CaptureSet n k) : CaptureSet n.succ k :=
+  C.rename (RenameMap.weaken (m := 0))
+
+def CaptureSet.cweaken (C : CaptureSet n k) : CaptureSet n k.succ :=
+  C.rename (RenameMap.cweaken (m := 0))
 
 /-!
 ## Types
@@ -83,15 +101,16 @@ inductive SType : Nat -> Nat -> Nat -> Type where
 | forall : CType n m k -> CType (n+1) m k -> SType n m k
 | tforall : SType n m k -> CType n (m+1) k -> SType n m k
 | cforall : CType n m (k+1) -> SType n m k
-| box : CType n m k -> SType n m k
+| box : CaptureSet n k -> CType n m k -> SType n m k
 
 end
 
-notation:60 S " ^ " C => CType.capt C S
+notation:80 S " ^ " C => CType.capt C S
 notation:max "⊤" => SType.top
 notation:50 "∀(x:" T ")" U => SType.forall T U
 notation:50 "∀[X<:" T "]" U => SType.tforall T U
 notation:50 "∀[c]" T => SType.cforall T
+notation:60 "□[" C "]" T => SType.box C T
 
 /-!
 ### Renaming
@@ -110,7 +129,7 @@ def SType.rename (S : SType n m k) (ρ : RenameMap n m k n' m' k') : SType n' m'
   | SType.forall T U => SType.forall (CType.rename T ρ) (CType.rename U ρ.ext)
   | SType.tforall T U => SType.tforall (SType.rename T ρ) (CType.rename U ρ.text)
   | SType.cforall T => SType.cforall (CType.rename T ρ.cext)
-  | SType.box T => SType.box (CType.rename T ρ)
+  | SType.box C T => SType.box (C.rename ρ) (CType.rename T ρ)
 
 end
 
@@ -126,6 +145,9 @@ def CType.cweaken (T : CType n m k) : CType n m k.succ := T.rename RenameMap.cwe
 
 def SType.cweaken (S : SType n m k) : SType n m k.succ := S.rename RenameMap.cweaken
 
+def CType.open {n : Nat} (T : CType n.succ m k) (x : Fin n) : CType n m k :=
+  T.rename (RenameMap.open x)
+
 /-!
 ## Terms
 !-/
@@ -135,12 +157,16 @@ inductive Term : Nat -> Nat -> Nat -> Type where
 | abs : CType n m k -> Term n.succ m k -> Term n m k
 | tabs : SType n m k -> Term n m.succ k -> Term n m k
 | cabs : Term n m k.succ -> Term n m k
-| app : Term n m k -> Fin n -> Term n m k
-| tapp : Term n m k -> SType n m k -> Term n m k
-| capp : Term n m k -> CaptureSet n k -> Term n m k
+| app : Fin n -> Fin n -> Term n m k
+| tapp : Fin n -> SType n m k -> Term n m k
+| capp : Fin n -> CaptureSet n k -> Term n m k
 | box : Term n m k -> Term n m k
-| unbox : CaptureSet n k -> Term n m k -> Term n m k
+| unbox : CaptureSet n k -> Fin n -> Term n m k
 | letin : Term n m k -> Term n.succ m k -> Term n m k
+
+notation:60 "λ(x:" T ")" t => Term.abs T t
+notation:60 "λ[X<:" S "]" t => Term.tabs S t
+notation:60 "λ[c]" t => Term.cabs t
 
 /-!
 ### Renaming
@@ -152,12 +178,127 @@ def Term.rename (t : Term n m k) (ρ : RenameMap n m k n' m' k') : Term n' m' k'
   | Term.abs T t => Term.abs (CType.rename T ρ) (t.rename ρ.ext)
   | Term.tabs S t => Term.tabs (SType.rename S ρ) (t.rename ρ.text)
   | Term.cabs t => Term.cabs (t.rename ρ.cext)
-  | Term.app t x => Term.app (t.rename ρ) (ρ.map x)
-  | Term.tapp t S => Term.tapp (t.rename ρ) (SType.rename S ρ)
-  | Term.capp t C => Term.capp (t.rename ρ) (CaptureSet.rename C ρ)
+  | Term.app f x => Term.app (ρ.map f) (ρ.map x)
+  | Term.tapp f S => Term.tapp (ρ.map f) (SType.rename S ρ)
+  | Term.capp f C => Term.capp (ρ.map f) (CaptureSet.rename C ρ)
   | Term.box t => Term.box (t.rename ρ)
-  | Term.unbox C t => Term.unbox (CaptureSet.rename C ρ) (t.rename ρ)
+  | Term.unbox C x => Term.unbox (CaptureSet.rename C ρ) (ρ.map x)
   | Term.letin t1 t2 => Term.letin (t1.rename ρ) (t2.rename ρ.ext)
+
+def Term.open {n : Nat} (t : Term n.succ m k) (x : Fin n) : Term n m k :=
+  t.rename (RenameMap.open x)
+
+/-!
+## Substitution
+!-/
+
+def TypeMap (m n' m' k' : Nat) := Fin m -> SType n' m' k'
+
+def CaptureMap (k n' k' : Nat) := Fin k -> CaptureSet n' k'
+
+def TypeMap.ext (f : TypeMap m n' m' k') : TypeMap m n'.succ m' k' :=
+  fun X => (f X).weaken
+
+def CaptureMap.ext (f : CaptureMap k n' k') : CaptureMap k n'.succ k' :=
+  fun c => (f c).weaken
+
+def TypeMap.open (S : SType n m k) : TypeMap m.succ n m k := by
+  intro i
+  cases i using Fin.cases
+  case zero => exact S
+  case succ i0 => exact (SType.tvar i0)
+
+def CaptureMap.open (C : CaptureSet n k) : CaptureMap k.succ n k := by
+  intro c
+  cases c using Fin.cases
+  case zero => exact C
+  case succ c0 => exact {c=c0}
+
+def TypeMap.text (f : TypeMap m n' m' k') : TypeMap m.succ n' m'.succ k' := by
+  intro X
+  cases X using Fin.cases
+  case zero => exact (SType.tvar 0)
+  case succ X0 => exact (f X0).tweaken
+
+def TypeMap.cext (f : TypeMap m n' m' k') : TypeMap m n' m' k'.succ :=
+  fun X => (f X).cweaken
+
+def CaptureMap.cext (f : CaptureMap k n' k') : CaptureMap k.succ n' k'.succ := by
+  intro c
+  cases c using Fin.cases
+  case zero => exact {c=0}
+  case succ c0 => exact (f c0).cweaken
+
+def TypeMap.id : TypeMap m n m k := fun X => SType.tvar X
+
+def CaptureMap.id : CaptureMap k n k := fun c => {c=c}
+
+structure SubstMap (n m k n' m' k' : Nat) where
+  map : FinMap n n'
+  tmap : TypeMap m n' m' k'
+  cmap : CaptureMap k n' k'
+
+def SubstMap.ext (σ : SubstMap n m k n' m' k') : SubstMap n.succ m k n'.succ m' k' :=
+  ⟨σ.map.ext, σ.tmap.ext, σ.cmap.ext⟩
+
+def SubstMap.text (σ : SubstMap n m k n' m' k') : SubstMap n m.succ k n' m'.succ k' :=
+  ⟨σ.map, σ.tmap.text, σ.cmap⟩
+
+def SubstMap.cext (σ : SubstMap n m k n' m' k') : SubstMap n m k.succ n' m' k'.succ :=
+  ⟨σ.map, σ.tmap.cext, σ.cmap.cext⟩
+
+def SubstMap.topen (S : SType n m k) : SubstMap n m.succ k n m k := ⟨id, TypeMap.open S, CaptureMap.id⟩
+
+def SubstMap.copen (C : CaptureSet n k) : SubstMap n m k.succ n m k := ⟨id, TypeMap.id, CaptureMap.open C⟩
+
+def CaptureSet.subst (C : CaptureSet n k) (σ : SubstMap n m k n' m' k') : CaptureSet n' k' :=
+  match C with
+  | singleton x => singleton (σ.map x)
+  | csingleton c => σ.cmap c
+  | empty => empty
+  | union C1 C2 => union (C1.subst σ) (C2.subst σ)
+
+mutual
+
+def SType.subst (S : SType n m k) (σ : SubstMap n m k n' m' k') : SType n' m' k' :=
+  match S with
+  | SType.top => SType.top
+  | SType.tvar x => σ.tmap x
+  | SType.forall T U => SType.forall (T.subst σ) (U.subst σ.ext)
+  | SType.tforall T U => SType.tforall (T.subst σ) (U.subst σ.text)
+  | SType.cforall T => SType.cforall (T.subst σ.cext)
+  | SType.box C T => SType.box (C.subst σ) (T.subst σ)
+
+def CType.subst (T : CType n m k) (σ : SubstMap n m k n' m' k') : CType n' m' k' :=
+  match T with
+  | CType.capt C S => CType.capt (C.subst σ) (S.subst σ)
+
+end
+
+def Term.subst (t : Term n m k) (σ : SubstMap n m k n' m' k') : Term n' m' k' :=
+  match t with
+  | Term.var x => Term.var (σ.map x)
+  | Term.abs T t => Term.abs (T.subst σ) (t.subst σ.ext)
+  | Term.tabs S t => Term.tabs (S.subst σ) (t.subst σ.text)
+  | Term.cabs t => Term.cabs (t.subst σ.cext)
+  | Term.app f x => Term.app (σ.map f) (σ.map x)
+  | Term.tapp f S => Term.tapp (σ.map f) (S.subst σ)
+  | Term.capp f C => Term.capp (σ.map f) (C.subst σ)
+  | Term.box t => Term.box (t.subst σ)
+  | Term.unbox C x => Term.unbox (C.subst σ) (σ.map x)
+  | Term.letin t1 t2 => Term.letin (t1.subst σ) (t2.subst σ.ext)
+
+def CType.topen {m : Nat} (T : CType n m.succ k) (S : SType n m k) : CType n m k :=
+  T.subst (SubstMap.topen S)
+
+def CType.copen {k : Nat} (T : CType n m k.succ) (C : CaptureSet n k) : CType n m k :=
+  T.subst (SubstMap.copen C)
+
+def Term.topen {m : Nat} (t : Term n m.succ k) (S : SType n m k) : Term n m k :=
+  t.subst (SubstMap.topen S)
+
+def Term.copen {k : Nat} (t : Term n m k.succ) (C : CaptureSet n k) : Term n m k :=
+  t.subst (SubstMap.copen C)
 
 /-!
 ## Context
@@ -236,6 +377,10 @@ inductive Subcapture : Context n m k -> CaptureSet n k -> CaptureSet n k -> Prop
 
 notation:50 Γ "⊢" C1 "<:c" C2 => Subcapture Γ C1 C2
 
+/-!
+## Subtyping
+!-/
+
 mutual
 
 inductive CSubtyp : Context n m k -> CType n m k -> CType n m k -> Prop where
@@ -256,7 +401,67 @@ inductive SSubtyp : Context n m k -> SType n m k -> SType n m k -> Prop where
 | tvar :
   Context.TBound Γ X S ->
   SSubtyp Γ (SType.tvar X) S
+| forall :
+  CSubtyp Γ T2 T1 ->
+  CSubtyp (Γ.var T2) U1 U2 ->
+  SSubtyp Γ (∀(x: T1) U1) (∀(x: T2) U2)
+| tforall :
+  SSubtyp Γ S2 S1 ->
+  CSubtyp (Γ.tvar S2) T1 T2 ->
+  SSubtyp Γ (∀[X<: S1] T1) (∀[X<: S2] T2)
+| cforall :
+  CSubtyp (Context.cvar Γ) T1 T2 ->
+  SSubtyp Γ (∀[c] T1) (∀[c] T2)
+| boxed :
+  (Γ ⊢ C1 <:c C2) ->
+  CSubtyp Γ T1 T2 ->
+  SSubtyp Γ (□[ C1 ] T1) (□[ C2 ] T2)
 
 end
+
+notation:50 Γ "⊢" T1 "<:" T2 => CSubtyp Γ T1 T2
+notation:50 Γ "⊢" S1 "<:s" S2 => SSubtyp Γ S1 S2
+
+/-!
+## Typing
+!-/
+inductive Typed : Context n m k -> Term n m k -> CType n m k -> CaptureSet n k -> Prop where
+| var :
+  Context.Bound Γ x (S^C) ->
+  Typed Γ (Term.var x) (S^{x= x}) {x= x}
+| sub :
+  Typed Γ t T C ->
+  (Γ ⊢ T <: T') ->
+  (Γ ⊢ C <:c C') ->
+  Typed Γ t T' C'
+| abs :
+  Typed (Context.var Γ T) t U (CaptureSet.weaken C0 ∪ {x=0}) ->
+  Typed Γ (λ(x:T)t) ((∀(x:T)U)^C0) {}
+| tabs :
+  Typed (Context.tvar Γ S) t T C ->
+  Typed Γ (λ[X<:S]t) ((∀[X<:S]T)^C) {}
+| cabs :
+  Typed (Context.cvar Γ) t T (CaptureSet.cweaken C0) ->
+  Typed Γ (λ[c]t) ((∀[c]T)^C0) {}
+| box :
+  Typed Γ t T C ->
+  Typed Γ (Term.box t) ((□[C]T)^{}) {}
+| app :
+  Typed Γ (Term.var x) ((∀(x:T)U)^C) C1 ->
+  Typed Γ (Term.var y) T C2 ->
+  Typed Γ (Term.app x y) (U.open x) (C1 ∪ C2)
+| tapp :
+  Typed Γ (Term.var x) ((∀[X<:S]T)^C) C0 ->
+  Typed Γ (Term.tapp x S) (T.topen S) C0
+| capp :
+  Typed Γ (Term.var x) ((∀[c]T)^C) C0 ->
+  Typed Γ (Term.capp x C) (T.copen C) C0
+| unbox :
+  Typed Γ (Term.var x) ((□[C]T)^{}) {} ->
+  Typed Γ (Term.unbox C x) T C
+| letin :
+  Typed Γ t1 T1 C1 ->
+  Typed (Context.var Γ T1) t2 (T2.weaken) (C2.weaken) ->
+  Typed Γ (Term.letin t1 t2) T2 (C1 ∪ C2)
 
 end CMCC
