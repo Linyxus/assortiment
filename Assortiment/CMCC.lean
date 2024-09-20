@@ -577,6 +577,8 @@ def Rename.ext {Γ : Context n m k} (ρ : Rename Γ f Δ) (T : CType n m k) :
   case map =>
     intro x T hb
     sorry
-  case tmap => sorry
+  case tmap =>
+    intro X S hb
+    sorry
 
 end CMCC
